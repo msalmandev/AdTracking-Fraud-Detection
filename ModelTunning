@@ -1,0 +1,451 @@
+
+
+# Data Preparation and visualization
+ 
+
+# Configurable file path
+file_path = 'feature_engineered_data.csv'  # Replace this with the path to your CSV file 
+
+
+# Import necessary libraries
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import KFold, cross_val_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC
+from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.utils import shuffle
+from imblearn.under_sampling import RandomUnderSampler
+
+# Load the data
+data = pd.read_csv(file_path)
+
+# Drop the unnecessary columns
+X = data.drop(['is_attributed', 'click_time', 'record'], axis=1)
+y = data['is_attributed']
+
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
+
+# Standardize the data
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Define the models
+models = [('LR', LogisticRegression()), 
+          ('LDA', LinearDiscriminantAnalysis()),
+          ('KNN', KNeighborsClassifier()),
+          ('CART', DecisionTreeClassifier()),
+          ('SVM', SVC()),
+          ('XGB', XGBClassifier()),
+          ('RF', RandomForestClassifier())]
+
+# Evaluate each model using k-fold cross-validation
+results = []
+names = []
+for name, model in models:
+    kfold = KFold(n_splits=10, random_state=42, shuffle=True)
+    cv_results = cross_val_score(model, X_train_scaled, y_train, cv=kfold, scoring='roc_auc')
+    results.append(cv_results)
+    names.append(name)
+    msg = '%s: %f (%f)' % (name, cv_results.mean(), cv_results.std())
+    print(msg)
+
+# Plot the model comparison
+fig, ax = plt.subplots(figsize=(12, 10))
+plt.title('Comparison of Classification Algorithms')
+plt.xlabel('Algorithm')
+plt.ylabel('ROC-AUC Score')
+plt.boxplot(results)
+ax.set_xticklabels(names)
+plt.show()
+
+# Parameters to tune for XGBoost
+param_grids = [
+    {'learning_rate': [0.01, 0.1], 'n_estimators': [50, 100]},
+    {'max_depth': [3, 4, 5], 'subsample': [0.7, 0.8]},
+    {'colsample_bytree': [0.7, 0.8], 'colsample_bylevel': [0.7, 0.8]},
+    {'scale_pos_weight': [0.5, 1], 'min_child_weight': [1, 2]},
+    {'gamma': [0, 0.1, 0.2], 'reg_alpha': [0, 0.1]}
+]
+
+# Hyperparameter tuning for XGBoost with graphs for each set of parameters
+for i, param_grid in enumerate(param_grids):
+    grid_search = GridSearchCV(estimator=XGBClassifier(), param_grid=param_grid, 
+                               cv=15, n_jobs=-1, scoring='roc_auc', verbose=1)
+    grid_search.fit(X_train_scaled, y_train)
+    print(f"Best parameters for set {i+1}: {grid_search.best_params_}")
+    print(f"Best score for set {i+1}: {grid_search.best_score_}")
+
+    # Plotting the results
+    means = grid_search.cv_results_['mean_test_score']
+    params = grid_search.cv_results_['params']
+    plt.figure(figsize=(12, 6))
+    plt.title(f"GridSearchCV results for parameter set {i+1}")
+    plt.xlabel("Parameters")
+    plt.ylabel("Mean Score")
+    plt.bar(range(len(params)), means, color='b')
+    plt.xticks(range(len(params)), params, rotation=90)
+    plt.show()
+
+
+# After fitting your best model using GridSearchCV
+# Extract the best estimator
+best_xgb_model = grid_search.best_estimator_
+
+# Get feature importances from the model
+importances = best_xgb_model.feature_importances_
+
+# Pair feature names with their importance scores
+feature_importance_pairs = list(zip(X.columns.tolist(), importances))
+
+# Sort the feature importances in descending order
+sorted_feature_importances = sorted(feature_importance_pairs, key=lambda x: x[1], reverse=True)
+
+# Print the sorted feature importances to console
+print("Feature Importances:")
+for feature, importance in sorted_feature_importances:
+    print(f"{feature}: {importance:.4f}")
+
+
+# Extract the best estimator from GridSearchCV
+best_xgb_model = grid_search.best_estimator_
+
+# Plot feature importances
+importances = best_xgb_model.feature_importances_
+feature_names = X.columns.tolist()
+
+plt.figure(figsize=(12, 6))
+plt.title('Feature Importances')
+plt.barh(range(len(importances)), importances, color='b', align='center')
+plt.yticks(range(len(importances)), [feature_names[i] for i in range(len(importances))])
+plt.xlabel('Relative Importance')
+plt.show()
+
+
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.metrics import roc_curve, auc
+import seaborn as sns
+
+# ... (your existing code for data loading and preprocessing)
+
+# Randomized Search for hyperparameter tuning
+param_dist = {
+    'learning_rate': [0.01, 0.05, 0.1, 0.2],
+    'n_estimators': [50, 100, 150],
+    'max_depth': [3, 4, 5, 6],
+    'subsample': [0.7, 0.8, 0.9],
+    'colsample_bytree': [0.7, 0.8, 0.9],
+    'gamma': [0, 0.1, 0.2],
+    'reg_alpha': [0, 0.1, 0.2]
+}
+
+random_search = RandomizedSearchCV(XGBClassifier(), param_distributions=param_dist, n_iter=50, 
+                                   scoring='roc_auc', n_jobs=-1, cv=5, verbose=1)
+random_search.fit(X_train_scaled, y_train)
+
+# Feature Importance Plot
+feature_importances = random_search.best_estimator_.feature_importances_
+features = X.columns
+sns.barplot(x=feature_importances, y=features)
+plt.title('Feature Importances')
+plt.show()
+
+# ROC Curve
+y_pred_prob = random_search.predict_proba(X_test_scaled)[:, 1]
+fpr, tpr, _ = roc_curve(y_test, y_pred_prob)
+roc_auc = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange', lw=1, label=f'ROC curve (area = {roc_auc})')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic')
+plt.legend(loc="lower right")
+plt.show()
+
+# Comparison of Results
+# ... (your existing code for comparison)
+
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error, f1_score, roc_auc_score, accuracy_score
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from xgboost import XGBClassifier
+import pandas as pd
+
+# Initialize an empty DataFrame to store results
+results_df = pd.DataFrame(columns=['Tuning Method', 'Data', 'ROC-AUC', 'MSE', 'MAE', 'F1-Score', 'Accuracy'])
+
+# Function to evaluate and store results
+def evaluate_model(model, X, y, tuning_method, data_name):
+    global results_df
+    y_pred = model.predict(X)
+    y_pred_prob = model.predict_proba(X)[:, 1]
+    
+    roc_auc = roc_auc_score(y, y_pred_prob)
+    mse = mean_squared_error(y, y_pred)
+    mae = mean_absolute_error(y, y_pred)
+    f1 = f1_score(y, y_pred)
+    accuracy = accuracy_score(y, y_pred)
+    
+    results_df = results_df.append({
+        'Tuning Method': tuning_method,
+        'Data': data_name,
+        'ROC-AUC': roc_auc,
+        'MSE': mse,
+        'MAE': mae,
+        'F1-Score': f1,
+        'Accuracy': accuracy
+    }, ignore_index=True)
+
+# Nested GridSearch
+param_grid_nested = param_grid_nested = {
+    'learning_rate': [0.1],
+    'n_estimators': [100],
+    'max_depth': [3],
+    'subsample': [0.7],
+    'colsample_bytree': [0.7],
+    'colsample_bylevel': [0.8],
+    'min_child_weight': [2],
+    'scale_pos_weight': [0.5],
+    'gamma': [0.2],
+    'reg_alpha': [0.1]
+}
+grid_search_nested = GridSearchCV(estimator=XGBClassifier(), param_grid=param_grid_nested, 
+                                  cv=15, n_jobs=-1, scoring='roc_auc', verbose=1)
+grid_search_nested.fit(X_train_scaled, y_train)
+best_model_nested = grid_search_nested.best_estimator_
+
+# RandomizedSearchCV
+param_dist = {
+    'learning_rate': [0.01, 0.05, 0.1, 0.2],
+    'n_estimators': [50, 100, 150],
+    'max_depth': [3, 4, 5, 6]
+}
+
+random_search = RandomizedSearchCV(XGBClassifier(), param_distributions=param_dist, n_iter=50, 
+                                   scoring='roc_auc', n_jobs=-1, cv=5, verbose=1)
+random_search.fit(X_train_scaled, y_train)
+best_model_random = random_search.best_estimator_
+
+# Fine-Grained Search
+param_grid_fine = {
+    'learning_rate': [0.05, 0.1, 0.15],
+    'n_estimators': [90, 100, 110],
+    'max_depth': [2, 3, 4]
+}
+grid_search_fine = GridSearchCV(estimator=XGBClassifier(), param_grid=param_grid_fine, 
+                                cv=15, n_jobs=-1, scoring='roc_auc', verbose=1)
+grid_search_fine.fit(X_train_scaled, y_train)
+best_model_fine = grid_search_fine.best_estimator_
+
+# F1 Score Optimization
+param_grid_f1 = param_grid_f1 = {
+    'learning_rate': [0.05, 0.1, 0.15],
+    'n_estimators': [90, 100, 110],
+    'max_depth': [2, 3, 4],
+    'min_child_weight': [1, 2, 3],
+    'gamma': [0, 0.1, 0.2],
+    'subsample': [0.7, 0.8, 0.9],
+    'colsample_bytree': [0.7, 0.8, 0.9],
+    'scale_pos_weight': [0.5, 1, 1.5],
+    'reg_alpha': [0, 0.1, 0.2]
+}
+grid_search_f1 = GridSearchCV(estimator=XGBClassifier(), param_grid=param_grid_f1, 
+                              cv=15, n_jobs=-1, scoring='f1', verbose=1)
+grid_search_f1.fit(X_train_scaled, y_train)
+best_model_f1 = grid_search_f1.best_estimator_
+
+# Evaluate the models
+evaluate_model(best_model_nested, X_train_scaled, y_train, 'Nested GridSearch', 'Training Data')
+evaluate_model(best_model_random, X_train_scaled, y_train, 'RandomizedSearchCV', 'Training Data')
+evaluate_model(best_model_fine, X_train_scaled, y_train, 'Fine-Grained Search', 'Training Data')
+evaluate_model(best_model_f1, X_train_scaled, y_train, 'F1 Score Optimization', 'Training Data')
+
+evaluate_model(best_model_nested, X_test_scaled, y_test, 'Nested GridSearch', 'Test Data')
+evaluate_model(best_model_random, X_test_scaled, y_test, 'RandomizedSearchCV', 'Test Data')
+evaluate_model(best_model_fine, X_test_scaled, y_test, 'Fine-Grained Search', 'Test Data')
+evaluate_model(best_model_f1, X_test_scaled, y_test, 'F1 Score Optimization', 'Test Data')
+
+# Display the results table
+print("Final Results Comparison Table:")
+print(results_df)
+
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error, f1_score, roc_auc_score, accuracy_score
+from xgboost import XGBClassifier
+from sklearn.model_selection import RandomizedSearchCV
+import pandas as pd
+
+# ... (your existing code for data loading, preprocessing)
+
+# Initialize an empty DataFrame to store results
+results_df = pd.DataFrame(columns=['Data', 'ROC-AUC', 'MSE', 'MAE', 'F1-Score', 'Accuracy'])
+
+# Function to evaluate and store results
+def evaluate_model(model, X, y, data_name):
+    global results_df
+    y_pred = model.predict(X)
+    y_pred_prob = model.predict_proba(X)[:, 1]
+    
+    roc_auc = roc_auc_score(y, y_pred_prob)
+    mse = mean_squared_error(y, y_pred)
+    mae = mean_absolute_error(y, y_pred)
+    f1 = f1_score(y, y_pred)
+    accuracy = accuracy_score(y, y_pred)
+    
+    results_df = results_df.append({
+        'Data': data_name,
+        'ROC-AUC': roc_auc,
+        'MSE': mse,
+        'MAE': mae,
+        'F1-Score': f1,
+        'Accuracy': accuracy
+    }, ignore_index=True)
+
+# Hyperparameter tuning using RandomizedSearchCV
+param_dist = {
+    'learning_rate': [0.01, 0.05, 0.1, 0.2],
+    'n_estimators': [50, 100, 150],
+    'max_depth': [3, 4, 5, 6]
+}
+
+random_search = RandomizedSearchCV(XGBClassifier(), param_distributions=param_dist, n_iter=50, 
+                                   scoring='roc_auc', n_jobs=-1, cv=5, verbose=1)
+random_search.fit(X_train_scaled, y_train)
+
+# Evaluate the model on training data
+evaluate_model(random_search.best_estimator_, X_train_scaled, y_train, 'Training Data')
+
+# Evaluate the model on test data
+evaluate_model(random_search.best_estimator_, X_test_scaled, y_test, 'Test Data')
+
+# Display the results table
+print("Results Comparison Table:")
+print(results_df)
+
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error, f1_score, roc_auc_score
+import pandas as pd
+
+# ... (your existing code for data loading, preprocessing, and model training)
+
+# Initialize an empty DataFrame to store results
+results_df = pd.DataFrame(columns=['Method', 'ROC-AUC', 'MSE', 'MAE', 'F1-Score', 'Accuracy'])
+
+# Function to evaluate and store results
+def evaluate_model(model, X_test, y_test, method_name):
+    global results_df
+    y_pred = model.predict(X_test)
+    y_pred_prob = model.predict_proba(X_test)[:, 1]
+    
+    roc_auc = roc_auc_score(y_test, y_pred_prob)
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    accuracy = model.score(X_test, y_test)
+    
+    results_df = results_df.append({
+        'Method': method_name,
+        'ROC-AUC': roc_auc,
+        'MSE': mse,
+        'MAE': mae,
+        'F1-Score': f1,
+        'Accuracy': accuracy
+    }, ignore_index=True)
+
+# Evaluate your models (replace 'your_model' with the actual model object)
+evaluate_model(grid_search_nested.best_estimator_, X_test_scaled, y_test, 'Nested GridSearch')
+evaluate_model(grid_search_fine.best_estimator_, X_test_scaled, y_test, 'Fine-Grained Search')
+evaluate_model(grid_search_f1.best_estimator_, X_test_scaled, y_test, 'F1 Score Optimization')
+
+# Display the results table
+print("Results Comparison Table:")
+print(results_df)
+
+
+
+# Import required libraries
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
+import numpy as np
+
+# Load the data
+data = pd.read_csv('feature_engineered_data.csv')
+
+# Drop unnecessary columns
+X = data.drop(['is_attributed', 'click_time', 'record'], axis=1)
+y = data['is_attributed']
+
+# Split data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
+
+# Standardize the features
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# Nested GridSearch with best parameters from each set
+param_grid_nested = {
+    'learning_rate': [0.1],
+    'n_estimators': [100],
+    'max_depth': [3],
+    'subsample': [0.7],
+    'colsample_bytree': [0.7],
+    'colsample_bylevel': [0.8],
+    'min_child_weight': [2],
+    'scale_pos_weight': [0.5],
+    'gamma': [0.2],
+    'reg_alpha': [0.1]
+}
+
+grid_search_nested = GridSearchCV(estimator=XGBClassifier(), param_grid=param_grid_nested, 
+                                  cv=15, n_jobs=-1, scoring='roc_auc', verbose=1)
+grid_search_nested.fit(X_train_scaled, y_train)
+
+print(f"Best parameters for Nested GridSearch: {grid_search_nested.best_params_}")
+print(f"Best score for Nested GridSearch: {grid_search_nested.best_score_}")
+
+# Fine-Grained Search around the best parameters
+param_grid_fine = {
+    'learning_rate': [0.05, 0.1, 0.15],
+    'n_estimators': [90, 100, 110],
+    'max_depth': [2, 3, 4]
+}
+
+grid_search_fine = GridSearchCV(estimator=XGBClassifier(), param_grid=param_grid_fine, 
+                                cv=15, n_jobs=-1, scoring='roc_auc', verbose=1)
+grid_search_fine.fit(X_train_scaled, y_train)
+
+print(f"Best parameters for Fine-Grained Search: {grid_search_fine.best_params_}")
+print(f"Best score for Fine-Grained Search: {grid_search_fine.best_score_}")
+
+# Different Scoring Metric (F1 Score)
+grid_search_f1 = GridSearchCV(estimator=XGBClassifier(), param_grid=param_grid_fine, 
+                              cv=15, n_jobs=-1, scoring='f1', verbose=1)
+grid_search_f1.fit(X_train_scaled, y_train)
+
+print(f"Best parameters for F1 Score: {grid_search_f1.best_params_}")
+print(f"Best F1 Score: {grid_search_f1.best_score_}")
+
+# Comparison of Results
+results = [grid_search_nested.best_score_, grid_search_fine.best_score_, grid_search_f1.best_score_]
+names = ['Nested GridSearch', 'Fine-Grained Search', 'F1 Score']
+
+plt.figure(figsize=(12, 6))
+plt.barh(names, results, color='blue')
+plt.xlabel('ROC-AUC Score')
+plt.title('Comparison of Different Tuning Methods')
+plt.show()
